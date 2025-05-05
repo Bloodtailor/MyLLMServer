@@ -5,7 +5,7 @@ from llama_cpp import Llama
 import logging
 import time
 
-from config import MODEL_ASSIGNMENTS, DEFAULT_N_GPU_LAYERS, DEFAULT_N_CTX, DEFAULT_MAX_RETRIES
+from config import MODEL_ASSIGNMENTS, DEFAULT_N_GPU_LAYERS, DEFAULT_N_CTX
 
 logger = logging.getLogger('llm_engine.llm_manager')
 
@@ -16,6 +16,7 @@ class ModelConfig:
     inference_params: Dict[str, str]
     model_path: str
     default_params: Dict[str, float]
+    max_context_window: int = DEFAULT_N_CTX
     
     @property
     def system_prefix(self) -> str:
@@ -49,13 +50,29 @@ class LLMManager:
         self.llm = None
         
     @classmethod
-    def Load(cls, model_name: str) -> 'LLMManager':
+    def Load(cls, model_name: str, context_length: int = None) -> 'LLMManager':
         """Load a model configuration and initialize the model."""
         
         if model_name not in MODEL_ASSIGNMENTS:
             raise ValueError(f"Unknown model: {model_name}")
             
         config = ModelConfig(**MODEL_ASSIGNMENTS[model_name])
+        
+        # If a context length was specified, override the default
+        if context_length is not None:
+            # Ensure the context length doesn't exceed the model's max context window
+            if hasattr(config, 'max_context_window') and context_length > config.max_context_window:
+                logger.warning(
+                    f"Requested context length {context_length} exceeds model's max context window "
+                    f"of {config.max_context_window}. Using {config.max_context_window} instead."
+                )
+                context_length = config.max_context_window
+            logger.info(f"Setting custom context length: {context_length}")
+        else:
+            # Use the default context length from config
+            context_length = DEFAULT_N_CTX
+            logger.info(f"Using default context length: {context_length}")
+            
         manager = cls(config)
         
         # Load the model
@@ -63,15 +80,23 @@ class LLMManager:
             manager.llm = Llama(
                 model_path=config.model_path,
                 n_gpu_layers=DEFAULT_N_GPU_LAYERS,
-                n_ctx=DEFAULT_N_CTX,
+                n_ctx=context_length,
                 verbose=False  # Reduce console output
             )
-            logger.info(f"Successfully loaded model: {model_name}")
+            logger.info(f"Successfully loaded model: {model_name} with context length {context_length}")
             return manager
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
             raise
         
+    def format_prompt(self, prompt: str, system_prompt: str = "") -> str:
+        """Format a prompt with system and user content."""
+        messages = {}
+        if system_prompt:
+            messages["system"] = system_prompt
+        messages["user"] = prompt
+        return self.wrap_multiple(messages)
+    
     def wrap(self, role: str, content: str) -> str:
         """Wrap content with appropriate prefixes/suffixes based on role."""
         if role == "system":
@@ -90,17 +115,14 @@ class LLMManager:
             result.append(self.wrap(role, content))
         return "".join(result)
     
-    def generate(self, prompt: str, system_prompt: str = "", **kwargs) -> str:
+    def generate(self, prompt: str, system_prompt: str = "", formatted_prompt: str = None, **kwargs) -> str:
         """Generate a response from the model."""
         if self.llm is None:
             raise ValueError("Model not loaded")
         
-        # Prepare the formatted prompt
-        messages = {}
-        if system_prompt:
-            messages["system"] = system_prompt
-        messages["user"] = prompt
-        formatted_prompt = self.wrap_multiple(messages)
+        # Use the provided formatted prompt or create one
+        if formatted_prompt is None:
+            formatted_prompt = self.format_prompt(prompt, system_prompt)
         
         # Merge default parameters with any provided overrides
         params = {**self.config.default_params}
@@ -144,17 +166,14 @@ class LLMManager:
             logger.error(f"Error generating response: {str(e)}")
             return f"Error: {str(e)}"
     
-    def generate_stream(self, prompt: str, system_prompt: str = "", **kwargs) -> Iterator[Dict[str, Any]]:
+    def generate_stream(self, prompt: str, system_prompt: str = "", formatted_prompt: str = None, **kwargs) -> Iterator[Dict[str, Any]]:
         """Generate a streaming response from the model."""
         if self.llm is None:
             raise ValueError("Model not loaded")
         
-        # Prepare the formatted prompt
-        messages = {}
-        if system_prompt:
-            messages["system"] = system_prompt
-        messages["user"] = prompt
-        formatted_prompt = self.wrap_multiple(messages)
+        # Use the provided formatted prompt or create one
+        if formatted_prompt is None:
+            formatted_prompt = self.format_prompt(prompt, system_prompt)
         
         # Merge default parameters with any provided overrides
         params = {**self.config.default_params}
@@ -215,15 +234,3 @@ class LLMManager:
             response = response[:-len(self.config.assistant_suffix)]
             
         return response.strip()
-    
-    def retry_generate(self, prompt: str, system_prompt: str = "", max_retries: int = DEFAULT_MAX_RETRIES, **kwargs) -> str:
-        """Attempt to generate a response with retries on failure."""
-        retries = 0
-        while retries < max_retries:
-            try:
-                return self.generate(prompt, system_prompt, **kwargs)
-            except Exception as e:
-                retries += 1
-                logger.warning(f"Attempt {retries}/{max_retries} failed: {str(e)}")
-                if retries == max_retries:
-                    return f"Failed to generate response after {max_retries} attempts: {str(e)}"
