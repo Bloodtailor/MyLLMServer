@@ -5,7 +5,6 @@ import logging
 import time
 import os
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 
 # Import our LLM manager
 from llm_manager import LLMManager
@@ -15,15 +14,43 @@ os.makedirs("logs", exist_ok=True)
 
 # Set up enhanced logging
 log_file = os.path.join("logs", f"llm_server_{datetime.now().strftime('%Y%m%d')}.log")
+
+# Configure basic logging first to catch any early errors
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5),  # 10MB per file, keep 5 backups
-        logging.StreamHandler()  # Also log to console
-    ]
 )
+
+# Create logger
 logger = logging.getLogger('llm_server')
+logger.setLevel(logging.INFO)
+
+# Create handlers
+try:
+    # Try to create a rotating file handler
+    from logging.handlers import RotatingFileHandler
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=10485760,  # 10MB per file
+        backupCount=5       # Keep 5 backups
+    )
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logger.info("Logging setup complete with file and console handlers")
+except Exception as e:
+    logger.warning(f"Could not set up rotating file handler: {str(e)}")
+    logger.info("Continuing with console logging only")
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -196,37 +223,103 @@ def model_status():
 def server_info():
     """Get server information."""
     import platform
-    import psutil
     
     try:
         logger.info(f"Server info requested by {request.remote_addr}")
         
         # Basic system information
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        
         info = {
             'server_platform': platform.platform(),
             'python_version': platform.python_version(),
-            'memory_total': memory.total,
-            'memory_available': memory.available,
-            'memory_percent': memory.percent,
-            'disk_total': disk.total,
-            'disk_free': disk.free,
-            'disk_percent': disk.percent,
-            'cpu_percent': psutil.cpu_percent(interval=1),
-            'cpu_count': psutil.cpu_count(logical=True),
             'current_model': current_model,
             'model_loaded': llm_manager is not None,
         }
         
+        # Try to get additional system info if psutil is available
+        try:
+            import psutil
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            # Add psutil information
+            info.update({
+                'memory_total': memory.total,
+                'memory_available': memory.available,
+                'memory_percent': memory.percent,
+                'disk_total': disk.total,
+                'disk_free': disk.free,
+                'disk_percent': disk.percent,
+                'cpu_percent': psutil.cpu_percent(interval=1),
+                'cpu_count': psutil.cpu_count(logical=True),
+            })
+        except ImportError:
+            info['note'] = 'Install psutil for more detailed system information'
+        
         return jsonify(info)
     except Exception as e:
         logger.error(f"Error getting server info: {str(e)}")
-        # If psutil is not installed
-        info = {
+        return jsonify({
+            'error': str(e),
             'server_platform': platform.platform(),
             'python_version': platform.python_version(),
-            'note': 'Install psutil for more detailed system information'
-        }
-        return jsonify(info)
+        })
+
+@app.route('/server/ping', methods=['GET'])
+def ping():
+    """Simple ping endpoint to check server status."""
+    return jsonify({
+        'status': 'online',
+        'timestamp': datetime.now().isoformat()
+    })
+    
+@app.errorhandler(404)
+def not_found(e):
+    """Handle 404 errors gracefully."""
+    logger.warning(f"404 error: {request.path} not found")
+    return jsonify({
+        'error': 'Endpoint not found',
+        'available_endpoints': [
+            '/query', '/models', '/model/load', 
+            '/model/unload', '/model/status',
+            '/server/info', '/server/ping'
+        ]
+    }), 404
+    
+@app.errorhandler(500)
+def server_error(e):
+    """Handle 500 errors gracefully."""
+    logger.error(f"500 error: {str(e)}")
+    return jsonify({
+        'error': 'Internal server error',
+        'message': str(e)
+    }), 500
+
+def get_ip_address():
+    """Get the server's IP address to display in the console."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # doesn't even have to be reachable
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
+
+if __name__ == '__main__':
+    # Print server information
+    try:
+        ip_address = get_ip_address()
+        print("="*50)
+        print(f"Starting LLM Server on {ip_address}:5000")
+        print(f"Server can be accessed at: http://{ip_address}:5000")
+        print(f"Log files are stored in: {os.path.abspath('logs')}")
+        print("="*50)
+        
+        # Run the server on all network interfaces so it's accessible from your phone
+        app.run(host='0.0.0.0', port=5000, debug=True)
+    except Exception as e:
+        print(f"Error starting server: {str(e)}")
+        logger.critical(f"Error starting server: {str(e)}", exc_info=True)

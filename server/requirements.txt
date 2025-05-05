@@ -6,7 +6,7 @@ Flask==3.1.0
 flask-cors==5.0.1
 itsdangerous==2.2.0
 Jinja2==3.1.6
-llama_cpp_python==0.3.8
+llama_cpp_python-cuda==0.3.8
 MarkupSafe==3.0.2
 numpy==2.2.5
 psutil==7.0.0
