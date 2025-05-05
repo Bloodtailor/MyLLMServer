@@ -3,14 +3,25 @@ from flask_cors import CORS
 import json
 import logging
 import time
+import os
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
 
 # Import our LLM manager
 from llm_manager import LLMManager
 
-# Set up basic logging
+# Create logs directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
+
+# Set up enhanced logging
+log_file = os.path.join("logs", f"llm_server_{datetime.now().strftime('%Y%m%d')}.log")
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5),  # 10MB per file, keep 5 backups
+        logging.StreamHandler()  # Also log to console
+    ]
 )
 logger = logging.getLogger('llm_server')
 
@@ -63,6 +74,7 @@ def query_llm_stream(prompt, system_prompt="", model_name="MyMainLLM"):
             time.sleep(0.01)
             
         # Final complete response
+        logger.info(f"Generated response of length {len(partial_response)} characters")
         yield json.dumps({"status": "complete", "response": partial_response}) + "\n"
         
     except Exception as e:
@@ -75,7 +87,9 @@ def query_llm(prompt, system_prompt="", model_name="MyMainLLM"):
     """Generate a non-streaming response from the model."""
     try:
         manager = get_llm_manager(model_name)
-        return manager.generate(prompt, system_prompt)
+        response = manager.generate(prompt, system_prompt)
+        logger.info(f"Generated non-streaming response of length {len(response)} characters")
+        return response
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
         return f"Error: {str(e)}"
@@ -90,18 +104,27 @@ def process_query():
         stream_mode = data.get('stream', True)  # Default to streaming
         
         if not prompt:
+            logger.warning("Received request with empty prompt")
             return jsonify({'error': 'No prompt provided'}), 400
         
-        logger.info(f"Received prompt: {prompt[:50]}...")
+        # Log the first 50 chars of the prompt to avoid huge log files
+        logger.info(f"Received prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
+        if system_prompt:
+            logger.info(f"System prompt: {system_prompt[:50]}{'...' if len(system_prompt) > 50 else ''}")
+        
+        request_ip = request.remote_addr
+        logger.info(f"Request from IP: {request_ip}")
         
         if stream_mode:
             # Stream the response
+            logger.info(f"Starting streaming response to {request_ip}")
             return Response(
                 stream_with_context(query_llm_stream(prompt, system_prompt, model_name)),
                 mimetype='application/x-ndjson'
             )
         else:
             # Non-streaming response
+            logger.info(f"Starting non-streaming response to {request_ip}")
             response = query_llm(prompt, system_prompt, model_name)
             return jsonify({'response': response})
     
@@ -113,6 +136,7 @@ def process_query():
 def list_models():
     """List all available models."""
     from config import MODEL_ASSIGNMENTS
+    logger.info(f"Model list requested by {request.remote_addr}")
     return jsonify({'models': list(MODEL_ASSIGNMENTS.keys())})
 
 @app.route('/model/load', methods=['POST'])
@@ -121,6 +145,8 @@ def load_model():
     try:
         data = request.get_json(force=True)
         model_name = data.get('model', 'MyMainLLM')
+        
+        logger.info(f"Loading model {model_name} requested by {request.remote_addr}")
         
         # This will load the model and unload any previous one
         manager = get_llm_manager(model_name)
@@ -139,15 +165,19 @@ def unload_model():
     """Unload the current model."""
     global llm_manager, current_model
     
+    logger.info(f"Unloading model requested by {request.remote_addr}")
+    
     if llm_manager is not None:
         model_name = current_model
         llm_manager = None
         current_model = None
+        logger.info(f"Model {model_name} unloaded successfully")
         return jsonify({
             'status': 'success', 
             'message': f'Model {model_name} unloaded successfully'
         })
     else:
+        logger.info("No model was loaded to unload")
         return jsonify({
             'status': 'success', 
             'message': 'No model was loaded'
@@ -156,12 +186,47 @@ def unload_model():
 @app.route('/model/status', methods=['GET'])
 def model_status():
     """Get current model status."""
+    logger.info(f"Model status requested by {request.remote_addr}")
     return jsonify({
         'loaded': llm_manager is not None,
         'current_model': current_model
     })
 
-if __name__ == '__main__':
-    # Run the server on all network interfaces so it's accessible from your phone
-    logger.info("Starting server on 0.0.0.0:5000")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+@app.route('/server/info', methods=['GET'])
+def server_info():
+    """Get server information."""
+    import platform
+    import psutil
+    
+    try:
+        logger.info(f"Server info requested by {request.remote_addr}")
+        
+        # Basic system information
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        info = {
+            'server_platform': platform.platform(),
+            'python_version': platform.python_version(),
+            'memory_total': memory.total,
+            'memory_available': memory.available,
+            'memory_percent': memory.percent,
+            'disk_total': disk.total,
+            'disk_free': disk.free,
+            'disk_percent': disk.percent,
+            'cpu_percent': psutil.cpu_percent(interval=1),
+            'cpu_count': psutil.cpu_count(logical=True),
+            'current_model': current_model,
+            'model_loaded': llm_manager is not None,
+        }
+        
+        return jsonify(info)
+    except Exception as e:
+        logger.error(f"Error getting server info: {str(e)}")
+        # If psutil is not installed
+        info = {
+            'server_platform': platform.platform(),
+            'python_version': platform.python_version(),
+            'note': 'Install psutil for more detailed system information'
+        }
+        return jsonify(info)
