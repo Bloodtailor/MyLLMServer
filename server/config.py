@@ -5,17 +5,12 @@ from pathlib import Path
 DEFAULT_N_GPU_LAYERS = -1  # -1 means use all available layers on GPU
 DEFAULT_N_CTX = 2048       # Context window size
 
-# Parsing settings
-DEFAULT_MAX_RETRIES = 3
-
-# Logging settings
-LOG_LEVEL = "INFO"
-
 # Model assignments for different use cases
 MODEL_ASSIGNMENTS = {
     "MyMainLLM": {
         "name": "kunoichi",
         "model_path": "C:/Users/soulo/.cache/lm-studio/models/TheBloke/Kunoichi-7B-GGUF/kunoichi-7b.Q6_K.gguf",
+        "max_context_window": 8192,  # Maximum context window supported by this model
         "inference_params": {
             "pre_prompt_prefix": "",
             "pre_prompt_suffix": "",
@@ -33,6 +28,7 @@ MODEL_ASSIGNMENTS = {
     "MySecondLLM": {
         "name": "alphamonarch",
         "model_path": "C:/Users/soulo/.cache/lm-studio/models/mlabonne/AlphaMonarch-7B-GGUF/alphamonarch-7b.Q4_0.gguf",
+        "max_context_window": 8192,  # Maximum context window supported by this model
         "inference_params": {
             "pre_prompt_prefix": "<|im_start|>system\n",
             "pre_prompt_suffix": "<|im_end|>\n",

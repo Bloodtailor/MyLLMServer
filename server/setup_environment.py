@@ -41,7 +41,7 @@ def create_virtual_environment():
         sys.exit(1)
 
 def install_dependencies():
-    """Install required dependencies."""
+    """Install required dependencies with CUDA support for llama-cpp-python."""
     print("Installing dependencies...")
     
     # Determine the pip executable based on the platform
@@ -56,33 +56,57 @@ def install_dependencies():
     except subprocess.CalledProcessError:
         print("WARNING: Failed to upgrade pip. Continuing with installation...")
     
-    # Check if requirements.txt exists
-    if os.path.exists("requirements.txt"):
-        print("Installing dependencies from requirements.txt...")
-        try:
-            subprocess.run([pip_path, "install", "-r", "requirements.txt"], check=True)
-            print("✓ All dependencies installed successfully.")
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to install dependencies: {e}")
-            sys.exit(1)
-    else:
-        # Install individual packages if requirements.txt doesn't exist
-        required_packages = ["flask", "flask-cors", "llama-cpp-python", "psutil"]
+    # Install Flask and other base dependencies first
+    base_packages = ["flask", "flask-cors", "psutil"]
+    try:
+        for package in base_packages:
+            print(f"Installing {package}...")
+            subprocess.run([pip_path, "install", package], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: Failed to install base dependencies: {e}")
+        sys.exit(1)
+    
+    # Install llama-cpp-python with CUDA support
+    print("\nInstalling llama-cpp-python with CUDA support...")
+    try:
+        # First uninstall any existing llama-cpp-python package to avoid conflicts
+        subprocess.run([pip_path, "uninstall", "-y", "llama-cpp-python"], check=False)
+        subprocess.run([pip_path, "uninstall", "-y", "llama-cpp-python-cuda"], check=False)
         
+        # Install with CUDA support
+        print("Installing llama-cpp-python with CUDA...")
+        env_vars = os.environ.copy()
+        env_vars["CMAKE_ARGS"] = "-DLLAMA_CUBLAS=on"
+        env_vars["FORCE_CMAKE"] = "1"
+        
+        install_command = [
+            pip_path, "install", "llama-cpp-python", "--force-reinstall", "--no-cache-dir"
+        ]
+        
+        subprocess.run(install_command, env=env_vars, check=True)
+        print("✓ Successfully installed llama-cpp-python with CUDA support")
+    except subprocess.CalledProcessError as e:
+        print(f"WARNING: Failed to install llama-cpp-python with CUDA support: {e}")
+        print("Attempting to install pre-built llama-cpp-python-cuda package instead...")
         try:
-            for package in required_packages:
-                print(f"Installing {package}...")
-                subprocess.run([pip_path, "install", package], check=True)
-            
-            # Create requirements.txt for future use
-            print("Creating requirements.txt file...")
-            with open("requirements.txt", "w") as f:
-                subprocess.run([pip_path, "freeze"], stdout=f, check=True)
-            
-            print("✓ All dependencies installed successfully.")
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to install dependencies: {e}")
+            subprocess.run([pip_path, "install", "llama-cpp-python-cuda"], check=True)
+            print("✓ Successfully installed pre-built llama-cpp-python-cuda package")
+        except subprocess.CalledProcessError as e2:
+            print(f"ERROR: Failed to install any version of llama-cpp-python with CUDA: {e2}")
+            print("\nTroubleshooting tips:")
+            print("1. Make sure you have CUDA toolkit installed")
+            print("2. Make sure you have Visual Studio Build Tools installed with C++ support")
+            print("3. Try running the command manually with administrator privileges")
             sys.exit(1)
+            
+    # Create requirements.txt for future use
+    print("\nCreating requirements.txt file...")
+    try:
+        with open("requirements.txt", "w") as f:
+            subprocess.run([pip_path, "freeze"], stdout=f, check=True)
+        print("✓ Updated requirements.txt with installed packages")
+    except subprocess.CalledProcessError as e:
+        print(f"WARNING: Failed to create requirements.txt: {e}")
 
 def check_model_paths():
     """Check if model paths in the configuration are valid."""
