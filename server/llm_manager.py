@@ -5,7 +5,7 @@ from llama_cpp import Llama
 import logging
 import time
 
-from config import MODEL_ASSIGNMENTS, DEFAULT_N_GPU_LAYERS, DEFAULT_N_CTX
+from config import MODEL_ASSIGNMENTS, DEFAULT_N_GPU_LAYERS, DEFAULT_N_CTX, DEFAULT_N_THREADS
 
 logger = logging.getLogger('llm_engine.llm_manager')
 
@@ -81,7 +81,11 @@ class LLMManager:
                 model_path=config.model_path,
                 n_gpu_layers=DEFAULT_N_GPU_LAYERS,
                 n_ctx=context_length,
-                verbose=False  # Reduce console output
+                n_threads=DEFAULT_N_THREADS,
+                verbose=False,  # Reduce console output
+                use_mlock=True,  # Keep the model in memory
+                use_mmap=True,   # Use memory mapping
+                f16_kv=True      # Use half-precision for KV cache
             )
             logger.info(f"Successfully loaded model: {model_name} with context length {context_length}")
             return manager

@@ -4,6 +4,7 @@ from pathlib import Path
 # Default generation settings
 DEFAULT_N_GPU_LAYERS = -1  # -1 means use all available layers on GPU
 DEFAULT_N_CTX = 2048       # Context window size
+DEFAULT_N_THREADS = 8      # Number of CPU threads to use for computation
 
 # Model assignments for different use cases
 MODEL_ASSIGNMENTS = {

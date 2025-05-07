@@ -1,0 +1,103 @@
+{
+  "test_info": {
+    "model": "MyMainLLM",
+    "prompt": "birds are not very good singers.",
+    "runs_per_test": 3,
+    "thread_count": 8,
+    "timestamp": "2025-05-07 04:44:45"
+  },
+  "results": {
+    "direct_non_streaming": {
+      "mode": "direct",
+      "streaming": false,
+      "runs": 3,
+      "avg_time_seconds": 5.277601798375447,
+      "avg_tokens": 143.33333333333334,
+      "avg_tokens_per_second": 26.621477989943706,
+      "thread_count": 8,
+      "all_times": [
+        4.926821947097778,
+        7.945555686950684,
+        2.960427761077881
+      ],
+      "all_tokens_per_second": [
+        25.371324830123648,
+        28.82114341934526,
+        25.67196572036221
+      ]
+    },
+    "direct_streaming": {
+      "mode": "direct",
+      "streaming": true,
+      "runs": 3,
+      "avg_time_seconds": 5.293323040008545,
+      "avg_tokens": 180.66666666666666,
+      "avg_tokens_per_second": 34.17372165883592,
+      "thread_count": 8,
+      "all_times": [
+        4.945088863372803,
+        7.959294557571411,
+        2.975585699081421
+      ],
+      "all_tokens_per_second": [
+        32.55755446428718,
+        34.676439978898685,
+        35.28717053332191
+      ]
+    },
+    "server_non_streaming": {
+      "mode": "server",
+      "streaming": false,
+      "runs": 3,
+      "avg_time_seconds": 101.33561102549235,
+      "avg_tokens": 164.66666666666666,
+      "avg_tokens_per_second": 1.6658452227502247,
+      "all_times": [
+        130.09312295913696,
+        125.00076127052307,
+        48.91294884681702
+      ],
+      "all_tokens_per_second": [
+        1.521986677667758,
+        1.6559899147495312,
+        1.8195590758333848
+      ]
+    },
+    "server_streaming": {
+      "mode": "server",
+      "streaming": true,
+      "runs": 3,
+      "avg_time_seconds": 63.26663327217102,
+      "avg_tokens": 146,
+      "avg_tokens_per_second": 2.307331397101971,
+      "all_times": [
+        65.29949903488159,
+        55.633665800094604,
+        68.86673498153687
+      ],
+      "all_tokens_per_second": [
+        2.3124220282201406,
+        2.300765160072956,
+        2.308807003012816
+      ]
+    }
+  },
+  "comparisons": {
+    "direct_streaming_vs_non_streaming": {
+      "speedup_factor": 0.7790043547411081,
+      "conclusion": "Streaming is faster"
+    },
+    "server_streaming_vs_non_streaming": {
+      "speedup_factor": 0.7219791768284961,
+      "conclusion": "Streaming is faster"
+    },
+    "direct_vs_server_non_streaming": {
+      "speedup_factor": 15.98076317438004,
+      "conclusion": "Direct is faster"
+    },
+    "direct_vs_server_streaming": {
+      "speedup_factor": 14.810929067995358,
+      "conclusion": "Direct is faster"
+    }
+  }
+}
