@@ -1,0 +1,103 @@
+{
+  "test_info": {
+    "model": "MyMainLLM",
+    "prompt": "Explain quantum computing in simple terms",
+    "runs_per_test": 3,
+    "thread_count": 8,
+    "timestamp": "2025-05-28 07:04:22"
+  },
+  "results": {
+    "direct_non_streaming": {
+      "mode": "direct",
+      "streaming": false,
+      "runs": 3,
+      "avg_time_seconds": 6.199678977330525,
+      "avg_tokens": 165.33333333333334,
+      "avg_tokens_per_second": 27.09783609018281,
+      "thread_count": 8,
+      "all_times": [
+        8.709285497665405,
+        4.2930686473846436,
+        5.596682786941528
+      ],
+      "all_tokens_per_second": [
+        25.375215918600997,
+        29.11670189018537,
+        26.801590461762064
+      ]
+    },
+    "direct_streaming": {
+      "mode": "direct",
+      "streaming": true,
+      "runs": 3,
+      "avg_time_seconds": 6.204320987065633,
+      "avg_tokens": 217.66666666666666,
+      "avg_tokens_per_second": 35.207416148698705,
+      "thread_count": 8,
+      "all_times": [
+        8.696656465530396,
+        4.301370620727539,
+        5.614935874938965
+      ],
+      "all_tokens_per_second": [
+        34.61100265291927,
+        35.57005742837416,
+        35.44118836480268
+      ]
+    },
+    "server_non_streaming": {
+      "mode": "server",
+      "streaming": false,
+      "runs": 3,
+      "avg_time_seconds": 87.89155793190002,
+      "avg_tokens": 181,
+      "avg_tokens_per_second": 2.0695532048953242,
+      "all_times": [
+        118.87099027633667,
+        67.83222198486328,
+        76.97146153450012
+      ],
+      "all_tokens_per_second": [
+        2.010583065257572,
+        2.0934003906239016,
+        2.1046761588044993
+      ]
+    },
+    "server_streaming": {
+      "mode": "server",
+      "streaming": true,
+      "runs": 3,
+      "avg_time_seconds": 68.26042358080547,
+      "avg_tokens": 165,
+      "avg_tokens_per_second": 2.4420717000202328,
+      "all_times": [
+        63.115283250808716,
+        48.70131826400757,
+        92.9646692276001
+      ],
+      "all_tokens_per_second": [
+        2.519199658316715,
+        2.5050656604127983,
+        2.301949781331185
+      ]
+    }
+  },
+  "comparisons": {
+    "direct_streaming_vs_non_streaming": {
+      "speedup_factor": 0.7696627317305808,
+      "conclusion": "Streaming is faster"
+    },
+    "server_streaming_vs_non_streaming": {
+      "speedup_factor": 0.8474580025140858,
+      "conclusion": "Streaming is faster"
+    },
+    "direct_vs_server_non_streaming": {
+      "speedup_factor": 13.093568228198022,
+      "conclusion": "Direct is faster"
+    },
+    "direct_vs_server_streaming": {
+      "speedup_factor": 14.417028029278178,
+      "conclusion": "Direct is faster"
+    }
+  }
+}
