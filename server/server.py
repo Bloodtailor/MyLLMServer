@@ -4,6 +4,9 @@ import json
 import logging
 import time
 import os
+import platform
+import subprocess
+import inspect
 from datetime import datetime
 
 # Import our LLM manager
@@ -354,6 +357,7 @@ def get_ip_address():
     finally:
         s.close()
     return IP
+
 
 if __name__ == '__main__':
     # Print server information
