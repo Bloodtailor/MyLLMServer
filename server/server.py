@@ -83,16 +83,17 @@ def get_llm_manager(model_name="MyMainLLM", context_length=None):
     return llm_manager
 
 # Function to query the LLM with streaming
-def query_llm_stream(prompt, system_prompt="", formatted_prompt=None, model_name="MyMainLLM"):
-    """Generate a streaming response from the model."""
+def query_llm_stream(prompt, system_prompt="", model_name="MyMainLLM"):
+    """Generate a streaming response from the model using raw prompt."""
     try:
         manager = get_llm_manager(model_name)
         
         # Send an immediate status update to prevent timeouts
         yield json.dumps({"status": "processing", "partial": ""}) + "\n"
         
-        # Get the streaming generator
-        stream = manager.generate_stream(prompt, system_prompt, formatted_prompt)
+        # Send the raw prompt directly to the model without formatting
+        # The model will receive exactly what the user typed
+        stream = manager.generate_stream_raw(prompt, system_prompt)
         
         # Stream the response chunks
         partial_response = ""
@@ -117,11 +118,12 @@ def query_llm_stream(prompt, system_prompt="", formatted_prompt=None, model_name
         yield json.dumps({"status": "error", "error": error_msg}) + "\n"
 
 # Function to query the LLM (non-streaming)
-def query_llm(prompt, system_prompt="", formatted_prompt=None, model_name="MyMainLLM"):
-    """Generate a non-streaming response from the model."""
+def query_llm(prompt, system_prompt="", model_name="MyMainLLM"):
+    """Generate a non-streaming response from the model using raw prompt."""
     try:
         manager = get_llm_manager(model_name)
-        response = manager.generate(prompt, system_prompt, formatted_prompt)
+        # Send the raw prompt directly without formatting
+        response = manager.generate_raw(prompt, system_prompt)
         logger.info(f"Generated non-streaming response of length {len(response)} characters")
         return response
     except Exception as e:
@@ -134,21 +136,19 @@ def process_query():
         data = request.get_json(force=True)
         prompt = data.get('prompt', '')
         system_prompt = data.get('system_prompt', '')
-        formatted_prompt = data.get('formatted_prompt')  # This will be None if not provided
         model_name = data.get('model', 'MyMainLLM')
         stream_mode = data.get('stream', True)  # Default to streaming
         
-        if not prompt and not formatted_prompt:
+        # Remove formatted_prompt handling - we're sending raw prompts only
+        
+        if not prompt:
             logger.warning("Received request with empty prompt")
             return jsonify({'error': 'No prompt provided'}), 400
         
         # Log the first 50 chars of the prompt to avoid huge log files
-        if prompt:
-            logger.info(f"Received prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
+        logger.info(f"Received raw prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
         if system_prompt:
             logger.info(f"System prompt: {system_prompt[:50]}{'...' if len(system_prompt) > 50 else ''}")
-        if formatted_prompt:
-            logger.info(f"Using formatted prompt: {formatted_prompt[:50]}{'...' if len(formatted_prompt) > 50 else ''}")
         
         request_ip = request.remote_addr
         logger.info(f"Request from IP: {request_ip}")
@@ -157,13 +157,13 @@ def process_query():
             # Stream the response
             logger.info(f"Starting streaming response to {request_ip}")
             return Response(
-                stream_with_context(query_llm_stream(prompt, system_prompt, formatted_prompt, model_name)),
+                stream_with_context(query_llm_stream(prompt, system_prompt, model_name)),
                 mimetype='application/x-ndjson'
             )
         else:
             # Non-streaming response
             logger.info(f"Starting non-streaming response to {request_ip}")
-            response = query_llm(prompt, system_prompt, formatted_prompt, model_name)
+            response = query_llm(prompt, system_prompt, model_name)
             return jsonify({'response': response})
     
     except Exception as e:
@@ -235,42 +235,51 @@ def model_status():
         'context_length': current_context_length
     })
 
-@app.route('/format_prompt', methods=['POST'])
-def format_prompt():
-    """Format a prompt using the current model's template and return context usage."""
+@app.route('/count_tokens', methods=['POST'])
+def count_tokens():
+    """Count tokens in a text string and return context usage."""
     try:
         data = request.get_json(force=True)
-        user_prompt = data.get('prompt', '')
-        system_prompt = data.get('system_prompt', '')
+        text = data.get('text', '')
         model_name = data.get('model', current_model or 'MyMainLLM')
         
-        if not user_prompt:
-            return jsonify({'error': 'No prompt provided'}), 400
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
         
-        # Get the manager but don't necessarily load the model
+        # Get token count - if model is loaded, use it; otherwise estimate
         if llm_manager is not None and current_model == model_name:
             manager = llm_manager
+            token_count = manager.count_tokens(text)
+            max_context = manager.llm.n_ctx() if manager.llm else manager.config.max_context_window
         else:
-            # Create a temporary manager without loading the model
+            # Create a temporary manager without loading the model for estimation
             from config import MODEL_ASSIGNMENTS
             from llm_manager import ModelConfig, LLMManager
             config = ModelConfig(**MODEL_ASSIGNMENTS[model_name])
             manager = LLMManager(config)
+            token_count = manager.count_tokens(text)  # This will use rough estimation
+            max_context = config.max_context_window
         
-        # Format the prompt
-        formatted = manager.format_prompt(user_prompt, system_prompt)
+        # Calculate usage statistics
+        usage_percentage = (token_count / max_context) * 100 if max_context > 0 else 0
         
-        # Get context usage information
-        context_usage = manager.get_context_usage(formatted)
+        context_usage = {
+            'token_count': token_count,
+            'max_context': max_context,
+            'usage_percentage': round(usage_percentage, 1),
+            'remaining_tokens': max_context - token_count
+        }
         
         return jsonify({
-            'formatted_prompt': formatted,
+            'text': text,
             'model': model_name,
             'context_usage': context_usage
         })
     except Exception as e:
-        logger.error(f"Error formatting prompt: {str(e)}")
+        logger.error(f"Error counting tokens: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+# Remove the old format_prompt endpoint since we're not auto-formatting anymore
 
 @app.route('/server/info', methods=['GET'])
 def server_info():
@@ -335,7 +344,7 @@ def not_found(e):
         'available_endpoints': [
             '/query', '/models', '/model/load', 
             '/model/unload', '/model/status',
-            '/format_prompt', '/server/info', '/server/ping'
+            '/count_tokens', '/server/info', '/server/ping'
         ]
     }), 404
     

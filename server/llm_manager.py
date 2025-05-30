@@ -92,7 +92,118 @@ class LLMManager:
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
             raise
+    
+    # ============================================================================
+    # RAW PROMPT METHODS (NEW) - Send prompts exactly as typed by user
+    # ============================================================================
+    
+    def generate_raw(self, prompt: str, system_prompt: str = "", **kwargs) -> str:
+        """Generate a response using the raw prompt without any formatting."""
+        if self.llm is None:
+            raise ValueError("Model not loaded")
         
+        # Combine system and user prompt simply if system prompt is provided
+        final_prompt = prompt
+        if system_prompt:
+            final_prompt = f"{system_prompt}\n\n{prompt}"
+        
+        # Merge default parameters with any provided overrides
+        params = {**self.config.default_params}
+        params.update(kwargs)
+        
+        # Generate response
+        try:
+            logger.info(f"Starting raw generation with prompt: {prompt[:50]}...")
+            start_time = time.time()
+            
+            # Send the raw prompt directly to the model
+            response = self.llm.create_completion(
+                prompt=final_prompt,
+                max_tokens=int(params.get("max_tokens", 300)),
+                temperature=float(params.get("temperature", 0.7)),
+                top_p=float(params.get("top_p", 0.95)),
+                top_k=int(params.get("top_k", 40)),
+                repeat_penalty=float(params.get("repeat_penalty", 1.1)),
+                stream=False
+            )
+            
+            # Log completion time
+            duration = time.time() - start_time
+            logger.info(f"Raw generation completed in {duration:.2f} seconds")
+            
+            # Extract response text
+            if isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
+                raw_response = response["choices"][0]["text"]
+            else:
+                logger.warning(f"Unexpected response format: {type(response)}")
+                if hasattr(response, "get"):
+                    raw_response = response.get("text", str(response))
+                else:
+                    raw_response = str(response)
+            
+            return raw_response.strip()
+            
+        except Exception as e:
+            logger.error(f"Error generating raw response: {str(e)}")
+            return f"Error: {str(e)}"
+    
+    def generate_stream_raw(self, prompt: str, system_prompt: str = "", **kwargs) -> Iterator[Dict[str, Any]]:
+        """Generate a streaming response using the raw prompt without any formatting."""
+        if self.llm is None:
+            raise ValueError("Model not loaded")
+        
+        # Combine system and user prompt simply if system prompt is provided
+        final_prompt = prompt
+        if system_prompt:
+            final_prompt = f"{system_prompt}\n\n{prompt}"
+        
+        # Merge default parameters with any provided overrides
+        params = {**self.config.default_params}
+        params.update(kwargs)
+        
+        try:
+            logger.info(f"Starting raw streaming generation with prompt: {prompt[:50]}...")
+            
+            # Create a streaming completion with raw prompt
+            stream = self.llm.create_completion(
+                prompt=final_prompt,
+                max_tokens=int(params.get("max_tokens", 300)),
+                temperature=float(params.get("temperature", 0.7)),
+                top_p=float(params.get("top_p", 0.95)),
+                top_k=int(params.get("top_k", 40)),
+                repeat_penalty=float(params.get("repeat_penalty", 1.1)),
+                stream=True
+            )
+            
+            # Return each chunk as it comes in
+            collected_text = ""
+            for chunk in stream:
+                # Extract the text from the chunk
+                if isinstance(chunk, dict) and "choices" in chunk and len(chunk["choices"]) > 0:
+                    token = chunk["choices"][0].get("text", "")
+                else:
+                    token = ""
+                    if hasattr(chunk, "get"):
+                        token = chunk.get("text", "")
+                
+                collected_text += token
+                
+                # Yield the token and current collected text
+                yield {
+                    "token": token,
+                    "text": collected_text.strip()
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in raw streaming generation: {str(e)}")
+            yield {
+                "error": str(e)
+            }
+    
+    # ============================================================================
+    # FORMATTED PROMPT METHODS (EXISTING) - For future manual formatting features
+    # ============================================================================
+    
     def format_prompt(self, prompt: str, system_prompt: str = "") -> str:
         """Format a prompt with system and user content."""
         messages = {}
@@ -120,7 +231,7 @@ class LLMManager:
         return "".join(result)
     
     def generate(self, prompt: str, system_prompt: str = "", formatted_prompt: str = None, **kwargs) -> str:
-        """Generate a response from the model."""
+        """Generate a response from the model (legacy method for compatibility)."""
         if self.llm is None:
             raise ValueError("Model not loaded")
         
@@ -134,11 +245,9 @@ class LLMManager:
         
         # Generate response
         try:
-            # Log that we're starting generation
-            logger.info(f"Starting generation with prompt: {prompt[:50]}...")
+            logger.info(f"Starting formatted generation with prompt: {prompt[:50]}...")
             start_time = time.time()
             
-            # Use the completion method to get a single response
             response = self.llm.create_completion(
                 prompt=formatted_prompt,
                 max_tokens=int(params.get("max_tokens", 300)),
@@ -152,14 +261,14 @@ class LLMManager:
             
             # Log completion time
             duration = time.time() - start_time
-            logger.info(f"Generation completed in {duration:.2f} seconds")
+            logger.info(f"Formatted generation completed in {duration:.2f} seconds")
             
             # Check response structure and extract text
             if isinstance(response, dict) and "choices" in response and len(response["choices"]) > 0:
                 raw_response = response["choices"][0]["text"]
             else:
                 logger.warning(f"Unexpected response format: {type(response)}")
-                if hasattr(response, "get"):  # Check if it's dict-like
+                if hasattr(response, "get"):
                     raw_response = response.get("text", str(response))
                 else:
                     raw_response = str(response)
@@ -167,11 +276,11 @@ class LLMManager:
             return self._parse_response(raw_response)
             
         except Exception as e:
-            logger.error(f"Error generating response: {str(e)}")
+            logger.error(f"Error generating formatted response: {str(e)}")
             return f"Error: {str(e)}"
     
     def generate_stream(self, prompt: str, system_prompt: str = "", formatted_prompt: str = None, **kwargs) -> Iterator[Dict[str, Any]]:
-        """Generate a streaming response from the model."""
+        """Generate a streaming response from the model (legacy method for compatibility)."""
         if self.llm is None:
             raise ValueError("Model not loaded")
         
@@ -184,10 +293,8 @@ class LLMManager:
         params.update(kwargs)
         
         try:
-            # Log that we're starting generation
-            logger.info(f"Starting streaming generation with prompt: {prompt[:50]}...")
+            logger.info(f"Starting formatted streaming generation with prompt: {prompt[:50]}...")
             
-            # Create a streaming completion
             stream = self.llm.create_completion(
                 prompt=formatted_prompt,
                 max_tokens=int(params.get("max_tokens", 300)),
@@ -202,11 +309,9 @@ class LLMManager:
             # Return each chunk as it comes in
             collected_text = ""
             for chunk in stream:
-                # Extract the text from the chunk
                 if isinstance(chunk, dict) and "choices" in chunk and len(chunk["choices"]) > 0:
                     token = chunk["choices"][0].get("text", "")
                 else:
-                    # Handle other chunk formats if needed
                     token = ""
                     if hasattr(chunk, "get"):
                         token = chunk.get("text", "")
@@ -214,14 +319,13 @@ class LLMManager:
                 collected_text += token
                 parsed_text = self._parse_response(collected_text)
                 
-                # Yield the token and current collected text
                 yield {
                     "token": token,
                     "text": parsed_text
                 }
                 
         except Exception as e:
-            logger.error(f"Error in streaming generation: {str(e)}")
+            logger.error(f"Error in formatted streaming generation: {str(e)}")
             yield {
                 "error": str(e)
             }
@@ -239,6 +343,10 @@ class LLMManager:
             
         return response.strip()
     
+    # ============================================================================
+    # UTILITY METHODS
+    # ============================================================================
+    
     def count_tokens(self, text: str) -> int:
         """Count the number of tokens in the given text."""
         if self.llm is None:
@@ -255,9 +363,9 @@ class LLMManager:
             # Fallback to rough estimate
             return len(text) // 3
 
-    def get_context_usage(self, formatted_prompt: str) -> dict:
-        """Get context usage information for a formatted prompt."""
-        token_count = self.count_tokens(formatted_prompt)
+    def get_context_usage(self, text: str) -> dict:
+        """Get context usage information for any text (raw or formatted)."""
+        token_count = self.count_tokens(text)
         
         # Get max context from the model's current settings
         max_context = self.llm.n_ctx() if self.llm else self.config.max_context_window
