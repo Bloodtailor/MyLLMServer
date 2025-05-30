@@ -237,7 +237,7 @@ def model_status():
 
 @app.route('/format_prompt', methods=['POST'])
 def format_prompt():
-    """Format a prompt using the current model's template."""
+    """Format a prompt using the current model's template and return context usage."""
     try:
         data = request.get_json(force=True)
         user_prompt = data.get('prompt', '')
@@ -260,9 +260,13 @@ def format_prompt():
         # Format the prompt
         formatted = manager.format_prompt(user_prompt, system_prompt)
         
+        # Get context usage information
+        context_usage = manager.get_context_usage(formatted)
+        
         return jsonify({
             'formatted_prompt': formatted,
-            'model': model_name
+            'model': model_name,
+            'context_usage': context_usage
         })
     except Exception as e:
         logger.error(f"Error formatting prompt: {str(e)}")

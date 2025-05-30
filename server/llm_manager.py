@@ -238,3 +238,35 @@ class LLMManager:
             response = response[:-len(self.config.assistant_suffix)]
             
         return response.strip()
+    
+    def count_tokens(self, text: str) -> int:
+        """Count the number of tokens in the given text."""
+        if self.llm is None:
+            # If no model is loaded, provide a rough estimate
+            # Most models use roughly 3-4 characters per token on average
+            return len(text) // 3
+        
+        try:
+            # Use the model's tokenizer to get accurate count
+            tokens = self.llm.tokenize(text.encode('utf-8'))
+            return len(tokens)
+        except Exception as e:
+            logger.warning(f"Error counting tokens: {str(e)}, using rough estimate")
+            # Fallback to rough estimate
+            return len(text) // 3
+
+    def get_context_usage(self, formatted_prompt: str) -> dict:
+        """Get context usage information for a formatted prompt."""
+        token_count = self.count_tokens(formatted_prompt)
+        
+        # Get max context from the model's current settings
+        max_context = self.llm.n_ctx() if self.llm else self.config.max_context_window
+        
+        usage_percentage = (token_count / max_context) * 100 if max_context > 0 else 0
+        
+        return {
+            'token_count': token_count,
+            'max_context': max_context,
+            'usage_percentage': round(usage_percentage, 1),
+            'remaining_tokens': max_context - token_count
+        }
