@@ -1,103 +1,288 @@
-# Personal LLM Mobile App
+# MyLLMServer - Local LLM Flask Server
 
-A mobile application that connects your Android device to local Large Language Models running on your PC.
+A high-performance Flask server for running Large Language Models locally with CUDA acceleration, designed to work seamlessly with the companion Android application (https://github.com/Bloodtailor/my-llm-android-app.git).
 
-## Project Overview
+## 🎯 Overview
 
-This project allows you to run powerful Large Language Models on your PC and interact with them through a simple mobile interface. The system consists of two main components:
+MyLLMServer provides a REST API interface for interacting with local LLM models, enabling you to run powerful AI models on your PC and access them from mobile devices or other applications. The server handles model loading, memory management, and streaming responses efficiently.
 
-1. **Python Server**: Runs on your PC and manages the LLM models
-2. **Android App**: Provides a user-friendly interface to interact with the models
+## ✨ Features
 
-## Features
+### Core Functionality
+- **Multiple Model Support**: Configure and switch between different GGUF models
+- **Dynamic Model Loading**: Load/unload models on demand to manage memory
+- **CUDA Acceleration**: Automatic GPU detection and utilization when available
+- **Streaming Responses**: Real-time token streaming for immediate feedback
+- **Context Management**: Configurable context windows and token counting
+- **Raw Prompt Mode**: Send prompts exactly as typed without auto-formatting
 
-- **Multiple Model Support**: Load different models based on your needs
-- **Model Management**: Load and unload models to manage memory usage
-- **Streaming Responses**: Real-time streaming of LLM responses
-- **System Prompts**: Customize model behavior with system instructions
-- **Error Handling**: Robust error catching and reporting
+### Performance & Reliability
+- **Memory Optimization**: Smart model loading/unloading to prevent OOM errors
+- **Connection Management**: Robust handling of multiple client connections
+- **Error Handling**: Comprehensive error catching with detailed logging
+- **System Monitoring**: Built-in performance and resource monitoring
+- **Auto-setup**: Automated environment configuration with CUDA support
 
-## Project Components
+### Developer Features
+- **RESTful API**: Clean, well-documented endpoints
+- **Detailed Logging**: Rotating log files with configurable levels
+- **Health Checks**: Server status and connectivity endpoints
+- **Hot Configuration**: Model settings without server restart
+- **Debug Tools**: GPU usage testing and diagnostics
 
-### Server-side Components
+## 🏗️ Architecture
 
-- **server.py**: Flask server that handles API requests from the Android app
-- **llm_manager.py**: Manages LLM operations, including loading models and generating responses
-- **config.py**: Configuration file for model settings and parameters
+```
+MyLLMServer/
+├── server.py              # Main Flask application
+├── llm_manager.py          # LLM operations and model management
+├── config.py               # Model configuration and parameters
+├── setup_environment.py    # Automated environment setup
+├── start_server.bat        # Windows startup script
+├── requirements.txt        # Python dependencies
+├── gpu_usage_test.py      # GPU diagnostic tool (optional)
+├── logs/                  # Server log files (created automatically)
+└── README.md
+```
 
-### Android App Components
+## 🚀 Quick Start
 
-- **MainActivity.kt**: Main UI with model selection, load/unload controls, and prompt input
-- **build.gradle.kts**: Dependencies and build configuration
-- **AndroidManifest.xml**: App permissions and configuration
+### 1. Environment Setup
 
-## Setup Instructions
+**Automated Setup (Recommended)**:
+```bash
+git clone https://github.com/yourusername/MyLLMServer.git
+cd MyLLMServer
+python setup_environment.py
+```
 
-### Server Setup
+The setup script will:
+- ✅ Check Python version (3.8+ required)
+- ✅ Detect NVIDIA GPU and CUDA installation
+- ✅ Verify Visual Studio Build Tools
+- ✅ Create virtual environment
+- ✅ Install dependencies with CUDA support
+- ✅ Create log directories
 
-1. Install required Python packages:
-   ```
-   pip install flask flask-cors llama-cpp-python
-   ```
+**Manual Setup**:
+```bash
+# Create virtual environment
+python -m venv venv
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Linux/Mac
 
-2. Update the model paths in `config.py` to point to your local LLM models
+# Install dependencies
+pip install -r requirements.txt
+```
 
-3. Run the server:
-   ```
-   python server.py
-   ```
+### 2. Model Configuration
 
-4. Note the server IP address displayed in the console
+Edit `config.py` to add your models:
 
-### Android App Setup
+```python
+MODEL_ASSIGNMENTS = {
+    "MyMainLLM": {
+        "name": "kunoichi",
+        "model_path": "C:/path/to/your/model.gguf",
+        "max_context_window": 8192,
+        "inference_params": {
+            "pre_prompt_prefix": "",
+            "pre_prompt_suffix": "",
+            "input_prefix": "\n### Instruction:\n",
+            "input_suffix": "",
+            "assistant_prefix": "\n### Response:\n",
+            "assistant_suffix": ""
+        },
+        "default_params": {
+            "temperature": 0.7,
+            "max_tokens": 300,
+            "top_p": 0.95,
+            "top_k": 40,
+            "repeat_penalty": 1.1
+        }
+    }
+}
+```
 
-1. Open the project in Android Studio
+### 3. Start Server
 
-2. Update the `serverBaseUrl` in `MainActivity.kt` with your PC's IP address:
-   ```kotlin
-   private val serverBaseUrl = "http://YOUR_PC_IP:5000"
-   ```
+**Windows**:
+```bash
+start_server.bat
+```
 
-3. Build and run the app on your phone
+**Manual Start**:
+```bash
+venv\Scripts\activate
+python server.py
+```
 
-4. Ensure your phone and PC are on the same network
+The server will display your IP address - use this in your Android app settings.
 
-## Usage
+## 📡 API Reference
 
-1. **Select a model** from the dropdown menu
+### Model Management
 
-2. **Load the model** by clicking "Load Model"
+**GET `/models`**
+```json
+{
+  "models": ["MyMainLLM", "MySecondLLM"]
+}
+```
 
-3. (Optional) Enter a **system prompt** to customize model behavior
+**POST `/model/load`**
+```json
+{
+  "model": "MyMainLLM",
+  "context_length": 4096
+}
+```
 
-4. Enter your prompt in the input field
+**POST `/model/unload`**
+```json
+{
+  "status": "success",
+  "message": "Model unloaded successfully"
+}
+```
 
-5. Click **Send** to get a response from the model
+**GET `/model/status`**
+```json
+{
+  "loaded": true,
+  "current_model": "MyMainLLM",
+  "context_length": 4096
+}
+```
 
-6. When done, click **Unload Model** to free up memory
+### Text Generation
 
-## API Endpoints
+**POST `/query`**
+```json
+{
+  "prompt": "What is artificial intelligence?",
+  "system_prompt": "You are a helpful assistant.",
+  "model": "MyMainLLM",
+  "stream": true
+}
+```
 
-The server exposes the following API endpoints:
+**Streaming Response** (NDJSON):
+```json
+{"status": "processing", "partial": ""}
+{"status": "generating", "partial": "Artificial intelligence"}
+{"status": "generating", "partial": "Artificial intelligence is..."}
+{"status": "complete", "response": "Full response text"}
+```
 
-- **POST /query**: Send a prompt to the model and get a response
-- **GET /models**: Get a list of available models
-- **POST /model/load**: Load a specific model
-- **POST /model/unload**: Unload the currently loaded model
-- **GET /model/status**: Check the current model status
+### Utilities
 
-## Next Steps
+**POST `/count_tokens`**
+```json
+{
+  "text": "Your text here",
+  "model": "MyMainLLM"
+}
+```
 
-- Add support for chat history
-- Implement model parameter customization in the UI
-- Add support for image generation models
-- Improve UI with better formatting
-- Add settings to configure server address
-- Implement authentication for secure access
+**Response**:
+```json
+{
+  "text": "Your text here",
+  "model": "MyMainLLM",
+  "context_usage": {
+    "token_count": 156,
+    "max_context": 4096,
+    "usage_percentage": 3.8,
+    "remaining_tokens": 3940
+  }
+}
+```
 
-## Troubleshooting
+**GET `/server/info`**
+```json
+{
+  "server_platform": "Windows-10",
+  "python_version": "3.11.0",
+  "current_model": "MyMainLLM",
+  "model_loaded": true,
+  "memory_total": 34359738368,
+  "gpu_available": true
+}
+```
 
-- **Connection Issues**: Ensure your phone and PC are on the same network
-- **Model Loading Errors**: Verify model paths in `config.py`
-- **Slow Responses**: Adjust `max_tokens` parameter or use a smaller model
-- **Timeout Errors**: Increase OkHttp timeout values in `MainActivity.kt`
+**GET `/server/ping`**
+```json
+{
+  "status": "online",
+  "timestamp": "2025-05-30T10:30:00"
+}
+```
+
+## ⚙️ Configuration
+
+### Model Parameters
+
+```python
+# In config.py
+DEFAULT_N_GPU_LAYERS = -1      # Use all GPU layers (-1) or specific count
+DEFAULT_N_CTX = 2048           # Default context window
+DEFAULT_N_THREADS = 8          # CPU threads for computation
+
+MODEL_ASSIGNMENTS = {
+    "YourModel": {
+        "name": "display-name",
+        "model_path": "/path/to/model.gguf",
+        "max_context_window": 8192,
+        "default_params": {
+            "temperature": 0.7,     # Creativity (0.0-2.0)
+            "max_tokens": 300,      # Response length limit
+            "top_p": 0.95,         # Nucleus sampling
+            "top_k": 40,           # Top-k sampling
+            "repeat_penalty": 1.1   # Prevent repetition
+        }
+    }
+}
+```
+
+### Server Settings
+
+**Port Configuration**: Server runs on port 5000 by default
+**CORS**: Enabled for all origins (configure in `server.py` for production)
+**Logging**: Rotating logs in `logs/` directory (10MB per file, 5 backups)
+**Timeouts**: Configurable connection and read timeouts
+
+
+### Debug Mode
+
+Enable detailed logging:
+```python
+# In server.py, change logging level
+logger.setLevel(logging.DEBUG)
+```
+
+Run with debug output:
+```bash
+python server.py --debug
+```
+
+## 📊 Monitoring
+
+
+### Health Checks
+```bash
+# Quick health check
+curl http://localhost:5000/server/ping
+
+# Detailed system info
+curl http://localhost:5000/server/info
+
+# Model status
+curl http://localhost:5000/model/status
+```
+
+
+## 🤝 Integration
+
+This server is designed to work with:
+- **Android LLM App**: Primary mobile client
