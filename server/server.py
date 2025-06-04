@@ -9,8 +9,16 @@ import subprocess
 import inspect
 from datetime import datetime
 
-# Import our LLM manager
+# Import our LLM manager and config
 from llm_manager import LLMManager
+from config import (
+    MODEL_ASSIGNMENTS,
+    GLOBAL_LOADING_PARAMETERS,
+    GLOBAL_INFERENCE_PARAMETERS,
+    get_loading_parameter_defaults,
+    get_inference_parameter_defaults,
+    validate_parameter
+)
 
 # Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
@@ -61,39 +69,41 @@ CORS(app)  # Enable CORS for all routes
 # Global variables
 llm_manager = None
 current_model = None
-current_context_length = None
+current_loading_params = None
 
-def get_llm_manager(model_name="MyMainLLM", context_length=None):
+def get_llm_manager(model_name="MyMainLLM", loading_params=None):
     """Get or initialize the LLM manager."""
-    global llm_manager, current_model, current_context_length
+    global llm_manager, current_model, current_loading_params
     
-    # If we're requesting a different model or context length, unload the current one
+    # If we're requesting a different model or loading parameters, unload the current one
     if (llm_manager is not None and 
-        (current_model != model_name or 
-         (context_length is not None and current_context_length != context_length))):
-        logger.info(f"Unloading model {current_model} to load {model_name} with context length {context_length}")
+        (current_model != model_name or current_loading_params != loading_params)):
+        logger.info(f"Unloading model {current_model} to load {model_name} with new parameters")
         llm_manager = None  # Let garbage collection free the memory
     
     if llm_manager is None:
-        logger.info(f"Initializing LLM manager with model {model_name} and context length {context_length}")
-        llm_manager = LLMManager.Load(model_name, context_length)
+        logger.info(f"Initializing LLM manager with model {model_name} and loading parameters {loading_params}")
+        llm_manager = LLMManager.Load(model_name, loading_params)
         current_model = model_name
-        current_context_length = context_length
+        current_loading_params = loading_params
         
     return llm_manager
 
 # Function to query the LLM with streaming
-def query_llm_stream(prompt, system_prompt="", model_name="MyMainLLM"):
+def query_llm_stream(prompt, system_prompt="", model_name="MyMainLLM", inference_params=None):
     """Generate a streaming response from the model using raw prompt."""
     try:
-        manager = get_llm_manager(model_name)
+        manager = get_llm_manager(model_name, current_loading_params)
         
         # Send an immediate status update to prevent timeouts
         yield json.dumps({"status": "processing", "partial": ""}) + "\n"
         
+        # Prepare inference parameters
+        kwargs = inference_params or {}
+        
         # Send the raw prompt directly to the model without formatting
         # The model will receive exactly what the user typed
-        stream = manager.generate_stream_raw(prompt, system_prompt)
+        stream = manager.generate_stream_raw(prompt, system_prompt, **kwargs)
         
         # Stream the response chunks
         partial_response = ""
@@ -118,17 +128,89 @@ def query_llm_stream(prompt, system_prompt="", model_name="MyMainLLM"):
         yield json.dumps({"status": "error", "error": error_msg}) + "\n"
 
 # Function to query the LLM (non-streaming)
-def query_llm(prompt, system_prompt="", model_name="MyMainLLM"):
+def query_llm(prompt, system_prompt="", model_name="MyMainLLM", inference_params=None):
     """Generate a non-streaming response from the model using raw prompt."""
     try:
-        manager = get_llm_manager(model_name)
+        manager = get_llm_manager(model_name, current_loading_params)
+        
+        # Prepare inference parameters
+        kwargs = inference_params or {}
+        
         # Send the raw prompt directly without formatting
-        response = manager.generate_raw(prompt, system_prompt)
+        response = manager.generate_raw(prompt, system_prompt, **kwargs)
         logger.info(f"Generated non-streaming response of length {len(response)} characters")
         return response
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
         return f"Error: {str(e)}"
+
+# ============================================================================
+# NEW PARAMETER ENDPOINTS
+# ============================================================================
+
+@app.route('/model/loading-parameters', methods=['GET'])
+def get_loading_parameters():
+    """Get all available loading parameters with their defaults and limits."""
+    try:
+        logger.info(f"Loading parameters requested by {request.remote_addr}")
+        
+        # Build response with global defaults and model-specific parameters
+        response = {
+            "global_defaults": GLOBAL_LOADING_PARAMETERS.copy(),
+            "model_specific": {}
+        }
+        
+        # Add model-specific loading parameters
+        for model_name, model_config in MODEL_ASSIGNMENTS.items():
+            if "loading_params" in model_config:
+                response["model_specific"][model_name] = model_config["loading_params"]
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Error getting loading parameters: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/model/inference-parameters', methods=['GET'])
+def get_inference_parameters():
+    """Get all inference parameters for current or specified model."""
+    try:
+        model_name = request.args.get('model', current_model or 'MyMainLLM')
+        logger.info(f"Inference parameters requested for {model_name} by {request.remote_addr}")
+        
+        # Get current values if model is loaded, otherwise use defaults
+        if llm_manager is not None and current_model == model_name:
+            current_defaults = llm_manager.get_inference_parameter_defaults()
+        else:
+            current_defaults = get_inference_parameter_defaults(model_name)
+        
+        # Build response with parameter definitions and current values
+        parameters = {}
+        for param_name, param_def in GLOBAL_INFERENCE_PARAMETERS.items():
+            current_value = current_defaults.get(param_name, param_def["default"])
+            parameters[param_name] = {
+                "current": current_value,
+                "default": param_def["default"],
+                "min": param_def.get("min"),
+                "max": param_def.get("max"),
+                "type": param_def.get("type", "float"),
+                "description": param_def.get("description", "")
+            }
+        
+        response = {
+            "model": model_name,
+            "parameters": parameters
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Error getting inference parameters: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# ============================================================================
+# UPDATED ENDPOINTS
+# ============================================================================
 
 @app.route('/query', methods=['POST'])
 def process_query():
@@ -136,10 +218,22 @@ def process_query():
         data = request.get_json(force=True)
         prompt = data.get('prompt', '')
         system_prompt = data.get('system_prompt', '')
-        model_name = data.get('model', 'MyMainLLM')
+        model_name = data.get('model', current_model or 'MyMainLLM')
         stream_mode = data.get('stream', True)  # Default to streaming
         
-        # Remove formatted_prompt handling - we're sending raw prompts only
+        # Extract inference parameters from request
+        inference_params = {}
+        for param_name in GLOBAL_INFERENCE_PARAMETERS.keys():
+            if param_name in data:
+                try:
+                    # Validate the parameter
+                    validated_value = validate_parameter(
+                        param_name, data[param_name], GLOBAL_INFERENCE_PARAMETERS[param_name]
+                    )
+                    inference_params[param_name] = validated_value
+                except ValueError as e:
+                    logger.warning(f"Invalid inference parameter {param_name}: {str(e)}")
+                    # Continue without this parameter
         
         if not prompt:
             logger.warning("Received request with empty prompt")
@@ -149,6 +243,8 @@ def process_query():
         logger.info(f"Received raw prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
         if system_prompt:
             logger.info(f"System prompt: {system_prompt[:50]}{'...' if len(system_prompt) > 50 else ''}")
+        if inference_params:
+            logger.info(f"Custom inference parameters: {inference_params}")
         
         request_ip = request.remote_addr
         logger.info(f"Request from IP: {request_ip}")
@@ -157,13 +253,13 @@ def process_query():
             # Stream the response
             logger.info(f"Starting streaming response to {request_ip}")
             return Response(
-                stream_with_context(query_llm_stream(prompt, system_prompt, model_name)),
+                stream_with_context(query_llm_stream(prompt, system_prompt, model_name, inference_params)),
                 mimetype='application/x-ndjson'
             )
         else:
             # Non-streaming response
             logger.info(f"Starting non-streaming response to {request_ip}")
-            response = query_llm(prompt, system_prompt, model_name)
+            response = query_llm(prompt, system_prompt, model_name, inference_params)
             return jsonify({'response': response})
     
     except Exception as e:
@@ -173,28 +269,41 @@ def process_query():
 @app.route('/models', methods=['GET'])
 def list_models():
     """List all available models."""
-    from config import MODEL_ASSIGNMENTS
     logger.info(f"Model list requested by {request.remote_addr}")
     return jsonify({'models': list(MODEL_ASSIGNMENTS.keys())})
 
 @app.route('/model/load', methods=['POST'])
 def load_model():
-    """Load a specific model."""
+    """Load a specific model with custom loading parameters."""
     try:
         data = request.get_json(force=True)
         model_name = data.get('model', 'MyMainLLM')
-        context_length = data.get('context_length')  # Will be None if not provided
         
-        logger.info(f"Loading model {model_name} with context length {context_length} requested by {request.remote_addr}")
+        # Extract loading parameters from request
+        loading_params = {}
+        for param_name in GLOBAL_LOADING_PARAMETERS.keys():
+            if param_name in data:
+                loading_params[param_name] = data[param_name]
+        
+        # Also check for model-specific parameters
+        if model_name in MODEL_ASSIGNMENTS and "loading_params" in MODEL_ASSIGNMENTS[model_name]:
+            for param_name in MODEL_ASSIGNMENTS[model_name]["loading_params"].keys():
+                if param_name in data:
+                    loading_params[param_name] = data[param_name]
+        
+        logger.info(f"Loading model {model_name} with parameters {loading_params} requested by {request.remote_addr}")
         
         # This will load the model and unload any previous one
-        manager = get_llm_manager(model_name, context_length)
+        manager = get_llm_manager(model_name, loading_params)
+        
+        # Get the actual loading parameters used
+        actual_params = manager.get_loading_parameters()
         
         return jsonify({
             'status': 'success', 
             'message': f'Model {model_name} loaded successfully',
             'model': model_name,
-            'context_length': current_context_length
+            'loading_parameters': actual_params
         })
     except Exception as e:
         logger.error(f"Error loading model: {str(e)}")
@@ -203,17 +312,17 @@ def load_model():
 @app.route('/model/unload', methods=['POST'])
 def unload_model():
     """Unload the current model."""
-    global llm_manager, current_model, current_context_length
+    global llm_manager, current_model, current_loading_params
     
     logger.info(f"Unloading model requested by {request.remote_addr}")
     
     if llm_manager is not None:
         model_name = current_model
-        context_length = current_context_length
+        loading_params = current_loading_params
         llm_manager = None
         current_model = None
-        current_context_length = None
-        logger.info(f"Model {model_name} with context length {context_length} unloaded successfully")
+        current_loading_params = None
+        logger.info(f"Model {model_name} with loading parameters {loading_params} unloaded successfully")
         return jsonify({
             'status': 'success', 
             'message': f'Model {model_name} unloaded successfully'
@@ -229,10 +338,17 @@ def unload_model():
 def model_status():
     """Get current model status."""
     logger.info(f"Model status requested by {request.remote_addr}")
+    
+    # Get current context length from loading parameters
+    context_length = None
+    if current_loading_params and "n_ctx" in current_loading_params:
+        context_length = current_loading_params["n_ctx"]
+    
     return jsonify({
         'loaded': llm_manager is not None,
         'current_model': current_model,
-        'context_length': current_context_length
+        'context_length': context_length,
+        'loading_parameters': current_loading_params
     })
 
 @app.route('/count_tokens', methods=['POST'])
@@ -250,7 +366,7 @@ def count_tokens():
         if llm_manager is not None and current_model == model_name:
             manager = llm_manager
             token_count = manager.count_tokens(text)
-            max_context = manager.llm.n_ctx() if manager.llm else manager.config.max_context_window
+            context_usage = manager.get_context_usage(text)
         else:
             # Create a temporary manager without loading the model for estimation
             from config import MODEL_ASSIGNMENTS
@@ -258,17 +374,17 @@ def count_tokens():
             config = ModelConfig(**MODEL_ASSIGNMENTS[model_name])
             manager = LLMManager(config)
             token_count = manager.count_tokens(text)  # This will use rough estimation
+            
+            # Calculate usage statistics manually
             max_context = config.max_context_window
-        
-        # Calculate usage statistics
-        usage_percentage = (token_count / max_context) * 100 if max_context > 0 else 0
-        
-        context_usage = {
-            'token_count': token_count,
-            'max_context': max_context,
-            'usage_percentage': round(usage_percentage, 1),
-            'remaining_tokens': max_context - token_count
-        }
+            usage_percentage = (token_count / max_context) * 100 if max_context > 0 else 0
+            
+            context_usage = {
+                'token_count': token_count,
+                'max_context': max_context,
+                'usage_percentage': round(usage_percentage, 1),
+                'remaining_tokens': max_context - token_count
+            }
         
         return jsonify({
             'text': text,
@@ -278,8 +394,6 @@ def count_tokens():
     except Exception as e:
         logger.error(f"Error counting tokens: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-# Remove the old format_prompt endpoint since we're not auto-formatting anymore
 
 @app.route('/server/info', methods=['GET'])
 def server_info():
@@ -294,7 +408,7 @@ def server_info():
             'server_platform': platform.platform(),
             'python_version': platform.python_version(),
             'current_model': current_model,
-            'context_length': current_context_length,
+            'loading_parameters': current_loading_params,
             'model_loaded': llm_manager is not None,
         }
         
@@ -344,7 +458,8 @@ def not_found(e):
         'available_endpoints': [
             '/query', '/models', '/model/load', 
             '/model/unload', '/model/status',
-            '/count_tokens', '/server/info', '/server/ping'
+            '/count_tokens', '/server/info', '/server/ping',
+            '/model/loading-parameters', '/model/inference-parameters'
         ]
     }), 404
     
@@ -362,8 +477,6 @@ def get_model_parameters():
     """Get model prefix/suffix parameters for the current or specified model."""
     try:
         model_name = request.args.get('model', current_model or 'MyMainLLM')
-        
-        from config import MODEL_ASSIGNMENTS
         
         if model_name not in MODEL_ASSIGNMENTS:
             return jsonify({'error': f'Unknown model: {model_name}'}), 400
@@ -403,15 +516,19 @@ def get_ip_address():
         s.close()
     return IP
 
-
 if __name__ == '__main__':
     # Print server information
     try:
         ip_address = get_ip_address()
         print("="*50)
-        print(f"Starting LLM Server on {ip_address}:5000")
+        print(f"Starting Enhanced LLM Server on {ip_address}:5000")
         print(f"Server can be accessed at: http://{ip_address}:5000")
         print(f"Log files are stored in: {os.path.abspath('logs')}")
+        print("\nNew endpoints available:")
+        print(f"  GET  /model/loading-parameters")
+        print(f"  GET  /model/inference-parameters")
+        print(f"  POST /model/load (enhanced with loading parameters)")
+        print(f"  POST /query (enhanced with inference parameters)")
         print("="*50)
         
         # Run the server on all network interfaces so it's accessible from your phone
