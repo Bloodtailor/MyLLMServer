@@ -357,6 +357,38 @@ def server_error(e):
         'message': str(e)
     }), 500
 
+@app.route('/model/parameters', methods=['GET'])
+def get_model_parameters():
+    """Get model prefix/suffix parameters for the current or specified model."""
+    try:
+        model_name = request.args.get('model', current_model or 'MyMainLLM')
+        
+        from config import MODEL_ASSIGNMENTS
+        
+        if model_name not in MODEL_ASSIGNMENTS:
+            return jsonify({'error': f'Unknown model: {model_name}'}), 400
+        
+        model_config = MODEL_ASSIGNMENTS[model_name]
+        inference_params = model_config.get('inference_params', {})
+        
+        # Extract prefix/suffix parameters
+        parameters = {
+            'model': model_name,
+            'pre_prompt_prefix': inference_params.get('pre_prompt_prefix', ''),
+            'pre_prompt_suffix': inference_params.get('pre_prompt_suffix', ''),
+            'input_prefix': inference_params.get('input_prefix', ''),
+            'input_suffix': inference_params.get('input_suffix', ''),
+            'assistant_prefix': inference_params.get('assistant_prefix', ''),
+            'assistant_suffix': inference_params.get('assistant_suffix', '')
+        }
+        
+        logger.info(f"Model parameters requested for {model_name} by {request.remote_addr}")
+        return jsonify(parameters)
+        
+    except Exception as e:
+        logger.error(f"Error getting model parameters: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 def get_ip_address():
     """Get the server's IP address to display in the console."""
     import socket
