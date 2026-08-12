@@ -1,5 +1,6 @@
-import os
-from pathlib import Path
+# Network settings for the Flask server
+SERVER_HOST = "0.0.0.0"    # Listen on all interfaces so the phone can reach it
+SERVER_PORT = 5000
 
 # Default generation settings
 DEFAULT_N_GPU_LAYERS = -1  # -1 means use all available layers on GPU
@@ -31,11 +32,6 @@ GLOBAL_LOADING_PARAMETERS = {
         "default": True,
         "type": "boolean",
         "description": "Use memory mapping for model files"
-    },
-    "f16_kv": {
-        "default": True,
-        "type": "boolean",
-        "description": "Use half-precision for key-value cache"
     }
 }
 
@@ -85,10 +81,18 @@ GLOBAL_INFERENCE_PARAMETERS = {
     }
 }
 
+class ParameterValidationError(ValueError):
+    """Raised when a parameter value fails type or range validation.
+
+    Subclasses ValueError so existing `except ValueError` handlers keep working,
+    but lets callers tell a bad *request* apart from a server-side ValueError
+    (e.g. llama-cpp's "Model path does not exist").
+    """
+
 def validate_parameter(param_name, value, param_def):
     """Validate a parameter value against its definition."""
     param_type = param_def.get("type", "float")
-    
+
     # Type conversion and validation
     try:
         if param_type == "boolean":
@@ -100,16 +104,16 @@ def validate_parameter(param_name, value, param_def):
         elif param_type == "float":
             value = float(value)
         else:
-            raise ValueError(f"Unknown parameter type: {param_type}")
+            raise ParameterValidationError(f"Unknown parameter type: {param_type}")
     except (ValueError, TypeError):
-        raise ValueError(f"Invalid value for {param_name}: {value} (expected {param_type})")
-    
+        raise ParameterValidationError(f"Invalid value for {param_name}: {value} (expected {param_type})")
+
     # Range validation
     if "min" in param_def and value < param_def["min"]:
-        raise ValueError(f"{param_name} value {value} is below minimum {param_def['min']}")
+        raise ParameterValidationError(f"{param_name} value {value} is below minimum {param_def['min']}")
     if "max" in param_def and value > param_def["max"]:
-        raise ValueError(f"{param_name} value {value} is above maximum {param_def['max']}")
-    
+        raise ParameterValidationError(f"{param_name} value {value} is above maximum {param_def['max']}")
+
     return value
 
 def get_loading_parameter_defaults():
@@ -131,8 +135,22 @@ def get_inference_parameter_defaults(model_name=None):
     if model_name and model_name in MODEL_ASSIGNMENTS:
         model_defaults = MODEL_ASSIGNMENTS[model_name].get("default_params", {})
         defaults.update(model_defaults)
-    
+
     return defaults
+
+def get_model_loading_parameter_definitions(model_name):
+    """Get the loading parameter definitions that apply to a model (global + model-specific)."""
+    definitions = dict(GLOBAL_LOADING_PARAMETERS)
+    if model_name in MODEL_ASSIGNMENTS:
+        definitions.update(MODEL_ASSIGNMENTS[model_name].get("loading_params", {}))
+    return definitions
+
+def get_default_n_ctx(model_name):
+    """Get the default context window a model would be loaded with."""
+    definitions = get_model_loading_parameter_definitions(model_name)
+    if "n_ctx" in definitions:
+        return definitions["n_ctx"].get("default", DEFAULT_N_CTX)
+    return DEFAULT_N_CTX
 
 # Model assignments for different use cases
 MODEL_ASSIGNMENTS = {

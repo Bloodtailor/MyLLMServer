@@ -1,4 +1,7 @@
 @echo off
+REM Run from this script's own directory no matter where it was launched from
+pushd "%~dp0"
+
 echo Starting LLM Server...
 echo.
 
@@ -8,32 +11,33 @@ echo.
 echo Note the IP address above - you'll need to enter it in your Android app.
 echo.
 
-REM Activate virtual environment if it exists, otherwise use system Python
-if exist venv\Scripts\activate.bat (
-    echo Activating virtual environment...
-    call venv\Scripts\activate.bat
-) else (
-    echo No virtual environment found, using system Python...
+if not exist "venv\Scripts\python.exe" (
+    echo ERROR: No virtual environment found in "%CD%\venv".
+    echo Run: python setup_environment.py
+    echo.
+    popd
+    pause
+    exit /b 1
 )
 
-REM Check if required packages are installed
-echo Checking required packages...
-python -c "import flask" 2>NUL
-if %ERRORLEVEL% NEQ 0 (
-    echo Installing Flask...
-    pip install flask
-)
+set "PYTHON=venv\Scripts\python.exe"
 
-python -c "import flask_cors" 2>NUL
+REM Install the pinned dependency set if the venv is empty/incomplete.
+REM Note: requirements.txt pins the CPU-only llama-cpp-python wheel from PyPI.
+REM For GPU offload, run setup_environment.py instead.
+"%PYTHON%" -c "import flask" 2>NUL
 if %ERRORLEVEL% NEQ 0 (
-    echo Installing Flask-CORS...
-    pip install flask-cors
-)
-
-python -c "import llama_cpp" 2>NUL
-if %ERRORLEVEL% NEQ 0 (
-    echo Installing llama-cpp-python...
-    pip install llama-cpp-python
+    echo Installing dependencies from requirements.txt...
+    "%PYTHON%" -m pip install -r requirements.txt
+    REM Must be "if errorlevel", not the percent form: inside a parenthesized
+    REM block cmd.exe substitutes percent-variables at parse time, i.e. before
+    REM pip has run, so the percent form would always see the stale exit code.
+    if errorlevel 1 (
+        echo ERROR: Dependency installation failed.
+        popd
+        pause
+        exit /b 1
+    )
 )
 
 echo.
@@ -41,10 +45,10 @@ echo Starting server on port 5000...
 echo Press Ctrl+C to stop the server.
 echo.
 
-REM Start the server
-python server.py
+"%PYTHON%" server.py
 
 REM In case the server exits
 echo.
 echo Server stopped.
+popd
 pause

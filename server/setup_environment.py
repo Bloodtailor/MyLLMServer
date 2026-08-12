@@ -8,7 +8,16 @@ import os
 import sys
 import platform
 import subprocess
-from pathlib import Path
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Prebuilt CUDA wheels published by llama-cpp-python's author
+CUDA_WHEEL_INDEX = "https://abetlen.github.io/llama-cpp-python/whl/cu124"
+
+def venv_bin(executable):
+    """Path to an executable inside the local venv."""
+    subdir = "Scripts" if platform.system() == "Windows" else "bin"
+    return os.path.join(SCRIPT_DIR, "venv", subdir, executable)
 
 def print_header(text):
     """Print a formatted header."""
@@ -179,13 +188,14 @@ def run_system_requirements_check():
 
 def create_virtual_environment():
     """Create a virtual environment if it doesn't exist."""
-    if os.path.exists("venv"):
+    venv_dir = os.path.join(SCRIPT_DIR, "venv")
+    if os.path.exists(venv_dir):
         print("✅ Virtual environment already exists.")
         return
 
     print("Creating virtual environment...")
     try:
-        subprocess.run([sys.executable, "-m", "venv", "venv"], check=True)
+        subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
         print("✅ Virtual environment created successfully.")
     except subprocess.CalledProcessError:
         print("ERROR: Failed to create virtual environment.")
@@ -195,12 +205,9 @@ def install_dependencies():
     """Install required dependencies with CUDA support for llama-cpp-python."""
     print_section("Installing Dependencies")
     
-    # Determine pip path
-    if platform.system() == "Windows":
-        pip_path = os.path.join("venv", "Scripts", "pip")
-    else:
-        pip_path = os.path.join("venv", "bin", "pip")
-    
+    pip_path = venv_bin("pip")
+    python_path = venv_bin("python")
+
     # Upgrade pip first
     try:
         print("Upgrading pip...")
@@ -222,65 +229,91 @@ def install_dependencies():
     
     # Install llama-cpp-python with CUDA support
     print_section("Installing llama-cpp-python with CUDA Support")
-    
-    # Method 1: Pre-built CUDA package (fastest)
-    print("Method 1: Trying pre-built llama-cpp-python-cuda package...")
+
+    # Uninstall any existing build so a CPU wheel can't shadow a CUDA one
+    subprocess.run([pip_path, "uninstall", "-y", "llama-cpp-python"], check=False)
+
+    # Method 1: Prebuilt CUDA wheels (fastest, no compiler needed)
+    print("Method 1: Trying the prebuilt CUDA wheel index (cu124)...")
     try:
-        # Uninstall any existing versions first
-        subprocess.run([pip_path, "uninstall", "-y", "llama-cpp-python"], check=False)
-        subprocess.run([pip_path, "uninstall", "-y", "llama-cpp-python-cuda"], check=False)
-        
-        subprocess.run([pip_path, "install", "llama-cpp-python-cuda"], check=True)
-        print("🎉 Successfully installed pre-built llama-cpp-python-cuda package!")
-        return
+        subprocess.run([
+            pip_path, "install", "llama-cpp-python",
+            "--extra-index-url", CUDA_WHEEL_INDEX
+        ], check=True)
+        print("Installed a wheel from the CUDA index, verifying it...")
+        # pip's exit code only says "something installed" - --extra-index-url
+        # merges with PyPI, so it can hand back a CPU-only wheel and still
+        # succeed. Only a build that reports GPU offload ends the ladder here.
+        if report_gpu_support(python_path):
+            print("🎉 Successfully installed a prebuilt CUDA wheel!")
+            return
+        print("❌ That wheel has no GPU offload (likely resolved from PyPI), trying Method 2...")
     except subprocess.CalledProcessError:
-        print("❌ Pre-built package failed, trying Method 2...")
-    
+        print("❌ No matching CUDA wheel, trying Method 2...")
+
     # Method 2: Build from source with CUDA flags
     print("\nMethod 2: Building from source with CUDA support...")
     try:
         env_vars = os.environ.copy()
-        env_vars["CMAKE_ARGS"] = "-DLLAMA_CUDA=on"
+        env_vars["CMAKE_ARGS"] = "-DGGML_CUDA=on"
         env_vars["FORCE_CMAKE"] = "1"
-        
+
+        # --no-binary forces an actual compile; without it pip happily reuses a
+        # prebuilt CPU wheel and cmake never runs.
         install_command = [
-            pip_path, "install", "llama-cpp-python", "--force-reinstall", "--no-cache-dir"
+            pip_path, "install", "llama-cpp-python",
+            "--force-reinstall", "--no-cache-dir",
+            "--no-binary", "llama-cpp-python"
         ]
-        
+
         print("This may take 5-10 minutes to compile...")
         subprocess.run(install_command, env=env_vars, check=True)
-        print("🎉 Successfully built llama-cpp-python with CUDA support!")
-        return
+        print("Source build finished, verifying it...")
+        if report_gpu_support(python_path):
+            print("🎉 Successfully built llama-cpp-python with CUDA support!")
+            return
+        print("❌ The source build has no GPU offload, falling back to CPU version...")
     except subprocess.CalledProcessError:
-        print("❌ Source build failed, trying Method 3...")
-    
-    # Method 3: Wheel repository
-    print("\nMethod 3: Trying CUDA wheel repository...")
-    try:
-        subprocess.run([
-            pip_path, "install", "llama-cpp-python",
-            "--extra-index-url", "https://abetlen.github.io/llama-cpp-python/whl/cu121"
-        ], check=True)
-        print("🎉 Successfully installed from CUDA wheel repository!")
-        return
-    except subprocess.CalledProcessError:
-        print("❌ Wheel repository failed, falling back to CPU version...")
-    
+        print("❌ Source build failed, falling back to CPU version...")
+
     # Fallback: CPU-only version
     print("\nFallback: Installing CPU-only version...")
     try:
         subprocess.run([pip_path, "install", "llama-cpp-python"], check=True)
         print("✅ Installed CPU-only version as fallback")
         print("⚠️  Your models will run on CPU only (slower but still works)")
+        report_gpu_support(python_path)
     except subprocess.CalledProcessError as e:
         print(f"ERROR: Even CPU installation failed: {e}")
         sys.exit(1)
 
+def report_gpu_support(python_path):
+    """Report whether the installed llama-cpp-python can actually offload to the GPU.
+
+    Returns True only when the installed build reports GPU offload support, so
+    callers can use it to decide whether to keep walking the fallback ladder.
+    """
+    try:
+        result = subprocess.run(
+            [python_path, "-c",
+             "import llama_cpp; print(bool(llama_cpp.llama_supports_gpu_offload()))"],
+            capture_output=True, text=True, check=True
+        )
+        if result.stdout.strip() == "True":
+            print("✅ Verified: this build supports GPU offload")
+            return True
+        print("⚠️  This build does NOT support GPU offload - models will run on CPU")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️  Could not verify GPU offload support: {e}")
+        return False
+
 def check_model_paths():
     """Check if model paths in the configuration are valid."""
     print_section("Checking Model Configuration")
-    
+
     try:
+        sys.path.insert(0, SCRIPT_DIR)
         from config import MODEL_ASSIGNMENTS
         
         valid_models = []
@@ -308,28 +341,24 @@ def check_model_paths():
 
 def setup_log_directory():
     """Create a directory for logs if it doesn't exist."""
-    log_dir = os.path.join(os.getcwd(), "logs")
+    log_dir = os.path.join(SCRIPT_DIR, "logs")
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
         print(f"✅ Created log directory: {log_dir}")
     else:
         print(f"✅ Log directory exists: {log_dir}")
 
-def create_requirements_file():
-    """Create requirements.txt for future use."""
-    print("Creating requirements.txt...")
-    
-    if platform.system() == "Windows":
-        pip_path = os.path.join("venv", "Scripts", "pip")
-    else:
-        pip_path = os.path.join("venv", "bin", "pip")
-    
+def create_lock_file():
+    """Snapshot the installed packages next to the curated requirements.txt."""
+    print("Writing requirements.lock.txt...")
+
+    lock_path = os.path.join(SCRIPT_DIR, "requirements.lock.txt")
     try:
-        with open("requirements.txt", "w") as f:
-            subprocess.run([pip_path, "freeze"], stdout=f, check=True)
-        print("✅ Created requirements.txt with installed packages")
+        with open(lock_path, "w") as f:
+            subprocess.run([venv_bin("pip"), "freeze"], stdout=f, check=True)
+        print(f"✅ Wrote {lock_path} (requirements.txt is hand-curated and left alone)")
     except subprocess.CalledProcessError:
-        print("⚠️  Failed to create requirements.txt")
+        print("⚠️  Failed to write requirements.lock.txt")
 
 def main():
     """Main function to run all setup steps."""
@@ -346,7 +375,7 @@ def main():
     install_dependencies()
     check_model_paths()
     setup_log_directory()
-    create_requirements_file()
+    create_lock_file()
     
     print_header("Setup Complete!")
     print("🎉 Environment setup finished successfully!")

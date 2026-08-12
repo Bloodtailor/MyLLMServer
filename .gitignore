@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Server runtime output
+logs/
+server/logs/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
