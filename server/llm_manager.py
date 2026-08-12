@@ -9,6 +9,7 @@ from config import (
     MODEL_ASSIGNMENTS,
     GLOBAL_LOADING_PARAMETERS,
     GLOBAL_INFERENCE_PARAMETERS,
+    LOG_PROMPT_CONTENT,
     ParameterValidationError,
     validate_parameter,
     get_loading_parameter_defaults,
@@ -225,7 +226,10 @@ class LLMManager:
             logger.error(f"Invalid inference parameters: {str(e)}")
             raise
 
-        logger.info(f"Starting raw generation with prompt: {prompt[:50]}...")
+        if LOG_PROMPT_CONTENT:
+            logger.info(f"Starting raw generation with prompt: {prompt[:50]}...")
+        else:
+            logger.info(f"Starting raw generation ({len(prompt)} prompt chars)")
         start_time = time.time()
 
         # Send the raw prompt directly to the model
@@ -264,7 +268,10 @@ class LLMManager:
             return
 
         try:
-            logger.info(f"Starting raw streaming generation with prompt: {prompt[:50]}...")
+            if LOG_PROMPT_CONTENT:
+                logger.info(f"Starting raw streaming generation with prompt: {prompt[:50]}...")
+            else:
+                logger.info(f"Starting raw streaming generation ({len(prompt)} prompt chars)")
 
             stream = self.llm.create_completion(
                 prompt=final_prompt,

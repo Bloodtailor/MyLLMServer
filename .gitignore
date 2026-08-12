@@ -12,3 +12,9 @@ server/logs/
 .vscode/
 .idea/
 .DS_Store
+
+# User data must never enter the repo
+*.log
+*.db
+*.sqlite
+*.sqlite3

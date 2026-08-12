@@ -626,6 +626,12 @@ root.setLevel(logging.DEBUG)
 
 Logs go to both the console and `server/logs/llm_server_YYYYMMDD.log`. Every module logs through the root logger, so a line appears exactly once in each place.
 
+## 🔒 Privacy
+
+Prompt text is **never written to the log files by default** — the server logs only character counts (e.g. `Received prompt (245 chars)`), so your conversations don't accumulate in `server/logs/`. If you need to see prompt text while debugging, set `LOG_PROMPT_CONTENT = True` in `config.py` and set it back when you're done; the logs stay on this machine either way.
+
+The `logs/` directory (and any `*.log`, `*.db`, or `*.sqlite*` file) is gitignored at both the repo root and inside `server/`, so user data cannot be committed to the repository — nothing user-generated has ever been part of this repo's history. Responses are never logged at all, only their lengths.
+
 ## 📊 Monitoring
 
 ### Health Checks

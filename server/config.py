@@ -2,6 +2,12 @@
 SERVER_HOST = "0.0.0.0"    # Listen on all interfaces so the phone can reach it
 SERVER_PORT = 5000
 
+# Privacy: when False (the default), prompt and system-prompt text is never
+# written to the log files — only character counts. Set True temporarily if
+# you need to see prompt text while debugging; logs stay on this machine and
+# are gitignored either way.
+LOG_PROMPT_CONTENT = False
+
 # Default generation settings
 DEFAULT_N_GPU_LAYERS = -1  # -1 means use all available layers on GPU
 DEFAULT_N_CTX = 2048       # Context window size

@@ -16,6 +16,7 @@ from config import (
     GLOBAL_LOADING_PARAMETERS,
     GLOBAL_INFERENCE_PARAMETERS,
     ParameterValidationError,
+    LOG_PROMPT_CONTENT,
     SERVER_HOST,
     SERVER_PORT,
     get_default_n_ctx,
@@ -296,10 +297,16 @@ def process_query():
             logger.warning("Received request with empty prompt")
             return jsonify({'error': 'No prompt provided'}), 400
 
-        # Log the first 50 chars of the prompt to avoid huge log files
-        logger.info(f"Received raw prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
-        if system_prompt:
-            logger.info(f"System prompt: {system_prompt[:50]}{'...' if len(system_prompt) > 50 else ''}")
+        if LOG_PROMPT_CONTENT:
+            logger.info(f"Received raw prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
+            if system_prompt:
+                logger.info(f"System prompt: {system_prompt[:50]}{'...' if len(system_prompt) > 50 else ''}")
+        else:
+            logger.info(
+                f"Received prompt ({len(prompt)} chars"
+                + (f", system prompt {len(system_prompt)} chars" if system_prompt else "")
+                + ")"
+            )
         if inference_params:
             logger.info(f"Custom inference parameters: {inference_params}")
 
